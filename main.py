@@ -19,8 +19,8 @@ CHANNEL_ID = -1002555306699
 GROUP_CHAT_ID = "@sigma6627272"
 MESSAGE_ID = 3
 
-EMAIL = "m3hg3c@gmail.com"
-PASSWORD = "M3hg123!A"
+EMAIL = "sigmasigma@gmail.com"
+PASSWORD = "sigmaidmga!A"
 STRIPE_PK = "pk_live_51J0pV2Ai5aSS7yFafQNdnFVlTHEw2v9DQyCKU4hs0u4R1R3MDes03yCFFeWlp0gEhVavJQQwUAJvQzSC3jSTye8Z00UACjDsfG"
 
 LOGIN_URL = 'https://blackdonkeybeer.com/my-account/'
