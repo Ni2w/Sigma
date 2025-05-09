@@ -11,7 +11,7 @@ from telegram.ext import (
 )
 from telegram import InputFile, InlineKeyboardMarkup, InlineKeyboardButton
 
-BOT_TOKEN = "7722625260:AAEFpfDD7CMf1aG_fFy59RVCWgIgMh0sedE"
+BOT_TOKEN = "7417431428:AAG9i28WhJSK0UHOSDSLV7GblbKu7lDI4iQ"
 CHANNEL_ID = -1002555306699
 GROUP_CHAT_ID = "@sigma6627272"
 MESSAGE_ID = 3
