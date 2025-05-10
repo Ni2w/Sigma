@@ -5,7 +5,9 @@ import requests
 import os
 import functools
 import logging
+import threading
 from datetime import datetime
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from bs4 import BeautifulSoup
 from telegram import InputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
@@ -301,6 +303,19 @@ async def callback_handler(update, context):
 
         await send_approved_file(chat_id, context)
 
+# === Dummy HTTP Server ===
+class KeepAliveHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+def start_dummy_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), KeepAliveHandler)
+    server.serve_forever()
+
+# === Entry Point ===
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
@@ -311,4 +326,5 @@ def main():
     app.run_polling()
 
 if __name__ == "__main__":
-    main()
+    threading.Thread(target=start_dummy_server).start()  # Keep Render Web Service alive
+    main()  # Start the Telegram bot
