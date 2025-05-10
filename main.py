@@ -14,6 +14,7 @@ from telegram.ext import (
 )
 
 # === CONFIG ===
+
 BOT_TOKEN = "7678348871:AAFKNVn1IAp46iBcTTOwo31i4WlT2KcZWGE"
 CHANNEL_ID = -1002555306699
 GROUP_CHAT_ID = "@sigma6627272"
@@ -42,8 +43,8 @@ logging.basicConfig(level=logging.INFO)
 
 def parse_combo_line(line):
     patterns = [
-        r'(\d{13,16})\|(\d{2})/(\d{2,4})\|(\d{3,4})',
-        r'(\d{13,16})\|(\d{2})\|(\d{2,4})\|(\d{3,4})'
+        r'(\d{13,16})\D+(\d{1,2})\D+(\d{2,4})\D+(\d{3,4})',
+        r'(\d{13,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})'
     ]
     for pattern in patterns:
         match = re.match(pattern, line)
@@ -225,7 +226,6 @@ async def callback_handler(update, context):
     query = update.callback_query
     await query.answer()
     chat_id = query.message.chat.id
-    user = update.effective_user
 
     if query.data == "stats":
         stats = live_stats.get(chat_id, {"approved": 0, "declined": 0, "error": 0, "total": 0})
@@ -259,6 +259,16 @@ async def callback_handler(update, context):
         live_stats[chat_id] = {"approved": 0, "declined": 0, "error": 0, "total": 0}
         await query.edit_message_text(f"⏳ Started checking {len(combos)} combos...")
 
+        stats_message = await context.bot.send_message(
+            chat_id,
+            f"🧾 <b>Stripe Blade — Live Stats</b>\n\n"
+            f"<b>Checked:</b> 0 / {len(combos)}\n"
+            f"<b>✅ Approved:</b> 0\n"
+            f"<b>❌ Declined:</b> 0\n"
+            f"<b>❗ Error:</b> 0",
+            parse_mode="HTML"
+        )
+
         for idx, combo in enumerate(combos, 1):
             status, msg, card = await run_blocking(process_combo, combo)
             stats = live_stats[chat_id]
@@ -271,14 +281,17 @@ async def callback_handler(update, context):
             else:
                 stats["error"] += 1
 
-            if idx % 10 == 0 or idx == len(combos):
-                await context.bot.send_message(
-                    chat_id,
-                    f"🧾 <b>Stripe Blade — Live Stats</b>\n\n"
-                    f"<b>Checked:</b> {stats['total']} / {len(combos)}\n"
-                    f"<b>✅ Approved:</b> {stats['approved']}\n"
-                    f"<b>❌ Declined:</b> {stats['declined']}\n"
-                    f"<b>❗ Error:</b> {stats['error']}",
+            if idx % 2 == 0 or idx == len(combos):
+                await context.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=stats_message.message_id,
+                    text=(
+                        f"🧾 <b>Stripe Blade — Live Stats</b>\n\n"
+                        f"<b>Checked:</b> {stats['total']} / {len(combos)}\n"
+                        f"<b>✅ Approved:</b> {stats['approved']}\n"
+                        f"<b>❌ Declined:</b> {stats['declined']}\n"
+                        f"<b>❗ Error:</b> {stats['error']}"
+                    ),
                     parse_mode="HTML"
                 )
 
@@ -287,7 +300,6 @@ async def callback_handler(update, context):
 
 async def single_check(update, context):
     chat_id = update.effective_chat.id
-    user = update.effective_user
     if not context.args:
         await update.message.reply_text("Usage: /chk 4242424242424242|12|2026|123")
         return
@@ -305,6 +317,7 @@ async def single_check(update, context):
     )
 
 # === Entry Point ===
+
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
