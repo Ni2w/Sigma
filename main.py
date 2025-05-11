@@ -15,7 +15,7 @@ from telegram.ext import (
 
 # === CONFIG ===
 
-BOT_TOKEN = "7678348871:AAFKNVn1IAp46iBcTTOwo31i4WlT2KcZWGE"
+BOT_TOKEN = "YOUR_BOT_TOKEN"
 CHANNEL_ID = -1002555306699
 GROUP_CHAT_ID = "@sigma6627272"
 MESSAGE_ID = 3
@@ -38,10 +38,8 @@ HEADERS = {
 combo_data = {}
 approved_data = {}
 live_stats = {}
-running_checks = {}
 
 logging.basicConfig(level=logging.INFO)
-
 
 def parse_combo_line(line):
     patterns = [
@@ -53,7 +51,6 @@ def parse_combo_line(line):
         if match:
             return match.group(1), match.group(2), match.group(3), match.group(4), line
     return None
-
 
 def fresh_login_session():
     session = requests.Session()
@@ -75,7 +72,6 @@ def fresh_login_session():
         raise Exception("Login failed")
     return session
 
-
 def get_ajax_nonce(session):
     resp = session.get(CHECK_URL, headers=HEADERS)
     soup = BeautifulSoup(resp.text, 'html.parser')
@@ -85,7 +81,6 @@ def get_ajax_nonce(session):
         if match:
             return match.group(1)
     raise Exception("AJAX nonce not found")
-
 
 def process_combo(combo):
     try:
@@ -155,21 +150,16 @@ def process_combo(combo):
     except Exception as e:
         return "ERROR", str(e), combo
 
-
 async def run_blocking(func, *args):
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, functools.partial(func, *args))
 
-
 def keyboard():
     return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("▶️ Start Check", callback_data="startcheck"),
-            InlineKeyboardButton("📈 View Stats", callback_data="stats")
-        ],
+        [InlineKeyboardButton("▶️ Start Check", callback_data="startcheck"),
+         InlineKeyboardButton("📈 View Stats", callback_data="stats")],
         [InlineKeyboardButton("ℹ️ Help & Usage", callback_data="help")]
     ])
-
 
 async def start(update, context):
     try:
@@ -191,7 +181,6 @@ async def start(update, context):
         parse_mode="HTML",
         reply_markup=keyboard()
     )
-
 
 async def upload_file(update, context):
     doc = update.message.document
@@ -215,7 +204,6 @@ async def upload_file(update, context):
         message_id=update.message.message_id
     )
 
-
 async def send_approved_file(chat_id, context):
     approved = approved_data.get(chat_id)
     if not approved:
@@ -231,7 +219,6 @@ async def send_approved_file(chat_id, context):
         await context.bot.send_document(chat_id, document=InputFile(f), filename="approved.txt")
 
     os.remove(path)
-
 
 async def callback_handler(update, context):
     query = update.callback_query
@@ -262,62 +249,51 @@ async def callback_handler(update, context):
         )
 
     elif query.data == "startcheck":
-        if running_checks.get(chat_id):
-            await query.answer("Already running a check!", show_alert=True)
+        combos = combo_data.get(chat_id)
+        if not combos:
+            await query.edit_message_text("Upload your combo.txt first.", reply_markup=keyboard())
             return
 
-        running_checks[chat_id] = True
-        try:
-            combos = combo_data.get(chat_id)
-            if not combos:
-                await query.edit_message_text("Upload your combo.txt first.", reply_markup=keyboard())
-                return
+        live_stats[chat_id] = {"approved": 0, "declined": 0, "error": 0, "total": 0}
+        await query.edit_message_text(f"⏳ Started checking {len(combos)} combos...")
 
-            live_stats[chat_id] = {"approved": 0, "declined": 0, "error": 0, "total": 0}
-            await query.edit_message_text(f"⏳ Started checking {len(combos)} combos...")
+        stats_message = await context.bot.send_message(
+            chat_id,
+            f"🧾 <b>Stripe Blade — Live Stats</b>\n\n"
+            f"<b>Checked:</b> 0 / {len(combos)}\n"
+            f"<b>✅ Approved:</b> 0\n"
+            f"<b>❌ Declined:</b> 0\n"
+            f"<b>❗ Error:</b> 0",
+            parse_mode="HTML"
+        )
 
-            stats_message = await context.bot.send_message(
-                chat_id,
-                f"🧾 <b>Stripe Blade — Live Stats</b>\n\n"
-                f"<b>Checked:</b> 0 / {len(combos)}\n"
-                f"<b>✅ Approved:</b> 0\n"
-                f"<b>❌ Declined:</b> 0\n"
-                f"<b>❗ Error:</b> 0",
+        for idx, combo in enumerate(combos, 1):
+            status, msg, card = await run_blocking(process_combo, combo)
+            stats = live_stats[chat_id]
+            stats["total"] += 1
+            if status == "APPROVED":
+                stats["approved"] += 1
+                approved_data[chat_id].append(card)
+            elif status == "DECLINED":
+                stats["declined"] += 1
+            else:
+                stats["error"] += 1
+
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=stats_message.message_id,
+                text=(
+                    f"🧾 <b>Stripe Blade — Live Stats</b>\n\n"
+                    f"<b>Checked:</b> {stats['total']} / {len(combos)}\n"
+                    f"<b>✅ Approved:</b> {stats['approved']}\n"
+                    f"<b>❌ Declined:</b> {stats['declined']}\n"
+                    f"<b>❗ Error:</b> {stats['error']}"
+                ),
                 parse_mode="HTML"
             )
 
-            for idx, combo in enumerate(combos, 1):
-                status, msg, card = await run_blocking(process_combo, combo)
-                stats = live_stats[chat_id]
-                stats["total"] += 1
-                if status == "APPROVED":
-                    stats["approved"] += 1
-                    approved_data[chat_id].append(card)
-                elif status == "DECLINED":
-                    stats["declined"] += 1
-                else:
-                    stats["error"] += 1
-
-                if idx % 2 == 0 or idx == len(combos):
-                    await context.bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=stats_message.message_id,
-                        text=(
-                            f"🧾 <b>Stripe Blade — Live Stats</b>\n\n"
-                            f"<b>Checked:</b> {stats['total']} / {len(combos)}\n"
-                            f"<b>✅ Approved:</b> {stats['approved']}\n"
-                            f"<b>❌ Declined:</b> {stats['declined']}\n"
-                            f"<b>❗ Error:</b> {stats['error']}"
-                        ),
-                        parse_mode="HTML"
-                    )
-
-            await context.bot.send_message(chat_id, "✅ <b>Check complete!</b>", parse_mode="HTML")
-            await send_approved_file(chat_id, context)
-
-        finally:
-            running_checks.pop(chat_id, None)
-
+        await context.bot.send_message(chat_id, "✅ <b>Check complete!</b>", parse_mode="HTML")
+        await send_approved_file(chat_id, context)
 
 async def single_check(update, context):
     chat_id = update.effective_chat.id
@@ -337,6 +313,7 @@ async def single_check(update, context):
         parse_mode="HTML"
     )
 
+# === Entry Point ===
 
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
@@ -346,7 +323,6 @@ def main():
     app.add_handler(CallbackQueryHandler(callback_handler))
     logging.info("Bot is running...")
     app.run_polling()
-
 
 if __name__ == "__main__":
     main()
